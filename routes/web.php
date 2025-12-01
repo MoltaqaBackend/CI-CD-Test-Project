@@ -3,5 +3,5 @@
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return "CI/CD Pipeline!";
+    return "CI/CD";
 });
