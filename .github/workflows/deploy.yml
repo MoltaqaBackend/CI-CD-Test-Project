@@ -1,0 +1,106 @@
+name: Deploy Laravel to cPanel
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout code in runner
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Setup PHP with required extensions
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, bcmath, intl, pdo_mysql
+
+      # Step 3: Install Composer dependencies in runner
+      - name: Install Composer dependencies
+        run: composer install --no-dev --optimize-autoloader
+
+      # Step 4: Setup SSH agent
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      # Step 5: Deploy to server
+      - name: Deploy to cPanel
+        run: |
+          # Determine environment based on branch
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            SERVER_USER="${{ secrets.LIVE_SERVER_USER }}"
+            SERVER_HOST="${{ secrets.LIVE_SERVER_HOST }}"
+            SERVER_PORT="${{ secrets.LIVE_SERVER_PORT }}"
+            SERVER_PATH="${{ secrets.LIVE_SERVER_PATH }}"
+            BRANCH_NAME="${{ secrets.LIVE_BRANCH || 'main' }}"
+          else
+            SERVER_USER="${{ secrets.DEV_SERVER_USER }}"
+            SERVER_HOST="${{ secrets.DEV_SERVER_HOST }}"
+            SERVER_PORT="${{ secrets.DEV_SERVER_PORT }}"
+            SERVER_PATH="${{ secrets.DEV_SERVER_PATH }}"
+            BRANCH_NAME="${{ secrets.DEV_BRANCH || 'develop' }}"
+          fi
+
+          # Set GitHub repository variable
+          GITHUB_REPO="${{ github.repository }}"
+
+          # SSH into server
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $SERVER_PORT $SERVER_USER@$SERVER_HOST \
+            SERVER_PATH="$SERVER_PATH" \
+            BRANCH_NAME="$BRANCH_NAME" \
+            GITHUB_REPO="$GITHUB_REPO" \
+            bash << 'EOF'
+
+            # Check if project folder exists, Git repo and composer.lock
+            if [ ! -d "$SERVER_PATH" ] || [ ! -d "$SERVER_PATH/.git" ] || [ ! -f "$SERVER_PATH/composer.lock" ]; then
+              echo "Project folder invalid or missing. Cloning repository..."
+              rm -rf "$SERVER_PATH"
+              git clone -b "$BRANCH_NAME" "https://github.com/$GITHUB_REPO.git" "$SERVER_PATH" || { echo "Failed to clone repository"; exit 1; }
+            fi
+
+            # Navigate to project folder
+            cd "$SERVER_PATH" || exit 1
+
+            # Ensure .env file exists
+            if [ ! -f ".env" ]; then
+              echo "Creating .env from .env.example"
+              cp .env.example .env || { echo "Failed to create .env"; exit 1; }
+            fi
+
+            # Update the project from Git
+            echo "Updating existing project..."
+            git fetch --all
+            git reset --hard "origin/$BRANCH_NAME"
+
+            # Install Composer dependencies
+            if command -v composer >/dev/null 2>&1; then
+              composer install --no-dev --optimize-autoloader
+            else
+              echo "Composer not found!"
+              exit 1
+            fi
+
+            # Laravel setup: generate key, migrate, cache config/routes/views, create storage link
+            if [ -f "artisan" ]; then
+              php artisan key:generate --force
+              php artisan migrate --force
+              php artisan config:cache
+              php artisan route:cache
+              php artisan view:cache
+              php artisan storage:link || true
+            else
+              echo "artisan file not found!"
+              exit 1
+            fi
+
+            echo "✅ Deployment completed successfully"
+          EOF
