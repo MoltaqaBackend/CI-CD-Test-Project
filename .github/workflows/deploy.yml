@@ -83,7 +83,7 @@ jobs:
 
             # Install Composer dependencies
             if command -v composer >/dev/null 2>&1; then
-              composer install --no-dev --optimize-autoloader
+              composer install --no-interaction --no-dev --optimize-autoloader --ignore-platform-reqs
             else
               echo "Composer not found!"
               exit 1
