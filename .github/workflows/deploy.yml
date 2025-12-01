@@ -24,7 +24,7 @@ jobs:
 
       # Step 3: Install Composer dependencies in runner
       - name: Install Composer dependencies
-        run: composer install --no-dev --optimize-autoloader
+        run: composer install --no-interaction --no-dev --optimize-autoloader --ignore-platform-reqs
 
       # Step 4: Setup SSH agent
       - name: Setup SSH
